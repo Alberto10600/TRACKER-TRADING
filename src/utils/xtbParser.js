@@ -83,12 +83,19 @@ export function parseXTBCSV(content) {
 }
 
 // Parse XTB Excel/XLSX format
+// XTB exports have metadata rows on top before the actual headers:
+//   Row 1: Account | 2594247
+//   Row 2: (account name)
+//   Row 3: Date from (UTC): ...
+//   Row 4: Date to (UTC): ...
+//   Row 5: "Closed Positions"
+//   Row 6: Instrument | Category | Ticker | Type | Volume | Open Price | Open Time (UTC) | ...
+//   Row 7+: data
 export function parseXTBXLSX(buffer) {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
   const trades = []
   const errors = []
 
-  // XTB typically puts trades in first sheet or "Closed" sheet
   const sheetName = wb.SheetNames.find(n =>
     n.toLowerCase().includes('closed') ||
     n.toLowerCase().includes('cerrad') ||
@@ -97,34 +104,69 @@ export function parseXTBXLSX(buffer) {
   ) || wb.SheetNames[0]
 
   const ws = wb.Sheets[sheetName]
-  const rows = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' })
 
-  for (const [index, row] of rows.entries()) {
+  // Read all rows as plain arrays to locate the actual header row
+  const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' })
+
+  // Find the row that contains actual column headers (has ≥2 known keywords)
+  const headerKeywords = ['instrument', 'position', 'type', 'volume', 'symbol', 'ticker', 'open price', 'close price']
+  let headerRowIdx = -1
+  for (let i = 0; i < Math.min(allRows.length, 20); i++) {
+    const row = allRows[i]
+    if (!row || !row.length) continue
+    const rowStr = row.map(c => String(c || '').toLowerCase()).join('|')
+    const matches = headerKeywords.filter(kw => rowStr.includes(kw)).length
+    if (matches >= 2) { headerRowIdx = i; break }
+  }
+
+  if (headerRowIdx === -1) {
+    return { trades: [], errors: [{ row: 0, message: 'No se encontraron las columnas de XTB. Verifica que el archivo sea correcto.' }], total: 0 }
+  }
+
+  const headers = allRows[headerRowIdx].map(h => String(h || '').trim())
+  const dataRows = allRows.slice(headerRowIdx + 1)
+
+  // Normalize a string: lowercase, remove all non-alphanumeric chars
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+  for (const [index, rowArr] of dataRows.entries()) {
+    if (!rowArr || rowArr.every(c => !c)) continue // skip blank rows
+
+    // Build object { header: value }
+    const row = {}
+    headers.forEach((h, i) => { if (h) row[h] = rowArr[i] })
+
     try {
       const keys = Object.keys(row)
+      // Flexible column getter: matches by normalized name (strips spaces, parens, slashes…)
       const get = (...names) => {
         for (const n of names) {
-          const key = keys.find(k => k.toLowerCase().replace(/\s/g,'') === n.toLowerCase().replace(/\s/g,''))
-          if (key && row[key] !== '' && row[key] !== undefined) return row[key]
+          const key = keys.find(k => norm(k) === norm(n))
+          if (key !== undefined && row[key] !== '' && row[key] !== undefined && row[key] !== null) return row[key]
         }
         return ''
       }
 
-      const positionId = get('Position', 'ID', 'Trade', 'Nº') || `XLSX_${index}`
-      const symbol = get('Symbol', 'Símbolo', 'Instrumento', 'Instrument')
-      const type = String(get('Type', 'Tipo', 'Side')).toUpperCase()
-      const openTime = parseXTBDate(get('Open time', 'OpenTime', 'Open Time', 'Hora apertura'))
-      const closeTime = parseXTBDate(get('Close time', 'CloseTime', 'Close Time', 'Hora cierre'))
-      const openPrice = parseNum(get('Open price', 'OpenPrice', 'Open Price', 'Precio apertura'))
-      const closePrice = parseNum(get('Close price', 'ClosePrice', 'Close Price', 'Precio cierre'))
-      const volume = parseNum(get('Volume', 'Volumen', 'Lots', 'Lotes'))
-      const sl = parseNum(get('S/L', 'Stop Loss', 'SL')) || null
-      const tp = parseNum(get('T/P', 'Take Profit', 'TP')) || null
-      const commission = parseNum(get('Commission', 'Comisión', 'Comision')) || 0
-      const swap = parseNum(get('Swap', 'Financiación')) || 0
-      const profit = parseNum(get('Profit', 'Beneficio', 'P&L', 'Net profit'))
+      // XTB exact column names (from screenshot) + common fallbacks
+      const positionId   = get('Position ID', 'Position', 'ID', 'Trade ID', 'Nº operación') || `XLSX_${index}`
+      const symbol       = get('Instrument', 'Symbol', 'Símbolo', 'Instrumento', 'Ticker')
+      const type         = String(get('Type', 'Tipo', 'Side')).toUpperCase()
+      const openTime     = parseXTBDate(get('Open Time (UTC)', 'Open Time UTC', 'Open Time', 'OpenTime', 'Hora apertura'))
+      const closeTime    = parseXTBDate(get('Close Time (UTC)', 'Close Time UTC', 'Close Time', 'CloseTime', 'Hora cierre'))
+      const openPrice    = parseNum(get('Open Price', 'OpenPrice', 'Precio apertura'))
+      const closePrice   = parseNum(get('Close Price', 'ClosePrice', 'Precio cierre'))
+      const volume       = parseNum(get('Volume', 'Volumen', 'Lots', 'Lotes'))
+      const sl           = parseNum(get('Stop Loss', 'S/L', 'SL', 'StopLoss')) || null
+      const tp           = parseNum(get('Take Profit', 'T/P', 'TP', 'TakeProfit')) || null
+      const commission   = parseNum(get('Commission', 'Comisión', 'Comision')) || 0
+      const swap         = parseNum(get('Swap', 'Financiación')) || 0
+      // XTB uses "Profit/Loss" column name
+      const profit       = parseNum(get('Profit/Loss', 'Profit', 'Beneficio', 'P&L', 'Net profit', 'ProfitLoss'))
 
-      if (!symbol || !openTime) continue
+      if (!symbol || !openTime) {
+        errors.push({ row: index + 1, message: `Symbol="${symbol}" openTime="${openTime}" — fila ignorada` })
+        continue
+      }
 
       let direction = type.includes('SELL') || type === 'S' ? 'SELL' : 'BUY'
       const isOpen = !closeTime
@@ -152,7 +194,7 @@ export function parseXTBXLSX(buffer) {
     }
   }
 
-  return { trades, errors, total: rows.length }
+  return { trades, errors, total: dataRows.filter(r => r && r.some(c => c)).length }
 }
 
 function parseXTBDate(val) {
