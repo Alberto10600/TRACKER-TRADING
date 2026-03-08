@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --scrollbar-width: 6px;
+  --scrollbar-color: #1e2d45;
+  --scrollbar-thumb: #334155;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: #0a0e1a;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-color);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Electron drag region */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Profit / Loss colors */
+.profit { color: #10b981; }
+.loss { color: #ef4444; }
+.neutral-pnl { color: #f59e0b; }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.slide-in { animation: slideIn 0.2s ease-out; }
+
+/* Card styles */
+@layer components {
+  .card {
+    @apply bg-bg-card border border-border rounded-xl p-4;
+  }
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-accent-blue/40 hover:bg-bg-hover cursor-pointer;
+  }
+  .btn-primary {
+    @apply bg-accent-blue hover:bg-blue-600 text-white font-medium px-4 py-2 rounded-lg transition-colors duration-150 flex items-center gap-2 text-sm;
+  }
+  .btn-secondary {
+    @apply bg-bg-tertiary hover:bg-bg-hover text-text-primary border border-border font-medium px-4 py-2 rounded-lg transition-colors duration-150 flex items-center gap-2 text-sm;
+  }
+  .btn-danger {
+    @apply bg-red-500/10 hover:bg-red-500/20 text-loss border border-red-500/20 font-medium px-4 py-2 rounded-lg transition-colors duration-150 flex items-center gap-2 text-sm;
+  }
+  .input {
+    @apply bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-text-primary placeholder-text-muted text-sm focus:outline-none focus:border-accent-blue/60 transition-colors;
+  }
+  .badge-profit {
+    @apply bg-profit/10 text-profit border border-profit/20 px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+  .badge-loss {
+    @apply bg-loss/10 text-loss border border-loss/20 px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+  .badge-neutral {
+    @apply bg-neutral/10 text-neutral border border-neutral/20 px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+}
+
+/* Number font */
+.font-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Table styles */
+.trade-table th {
+  @apply text-text-muted text-xs font-medium uppercase tracking-wider py-3 px-4 text-left border-b border-border;
+}
+.trade-table td {
+  @apply py-3 px-4 text-sm border-b border-border/50;
+}
+.trade-table tr:hover td {
+  @apply bg-bg-hover;
+}
+
+/* Recharts override */
+.recharts-text {
+  fill: #94a3b8 !important;
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #1e2d45 !important;
+}
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #141d2e !important;
+  border-color: #1e2d45 !important;
+  border-radius: 8px !important;
+}
