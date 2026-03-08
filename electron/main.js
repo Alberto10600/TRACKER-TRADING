@@ -4,12 +4,10 @@ const fs = require('fs')
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
-// Database path
 const userDataPath = app.getPath('userData')
 const dbPath = path.join(userDataPath, 'trading_tracker.db')
 const imagesPath = path.join(userDataPath, 'trade_images')
 
-// Ensure directories exist
 if (!fs.existsSync(imagesPath)) {
   fs.mkdirSync(imagesPath, { recursive: true })
 }
@@ -18,12 +16,13 @@ let db
 let mainWindow
 
 function initDatabase() {
-  const Database = require('better-sqlite3')
-  db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
+  // Uses Node's built-in sqlite module (Node 22+) — no compilation needed
+  const { DatabaseSync } = require('node:sqlite')
+  db = new DatabaseSync(dbPath)
 
-  // Create tables
+  db.exec("PRAGMA journal_mode = WAL")
+  db.exec("PRAGMA foreign_keys = ON")
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,13 +101,11 @@ function initDatabase() {
     );
   `)
 
-  // Insert default account if not exists
   const account = db.prepare('SELECT id FROM account_settings LIMIT 1').get()
   if (!account) {
     db.prepare('INSERT INTO account_settings (account_name) VALUES (?)').run('Mi Cuenta Principal')
   }
 
-  // Default setups
   const setupCount = db.prepare('SELECT COUNT(*) as c FROM setups').get()
   if (setupCount.c === 0) {
     const insertSetup = db.prepare('INSERT INTO setups (name, description) VALUES (?, ?)')
@@ -146,7 +143,6 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    icon: path.join(__dirname, '../public/icon.png'),
   })
 
   if (isDev) {
@@ -156,14 +152,11 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
+  mainWindow.on('closed', () => { mainWindow = null })
 }
 
 // ============ IPC HANDLERS ============
 
-// --- TRADES ---
 ipcMain.handle('trades:getAll', (_, filters = {}) => {
   let query = 'SELECT * FROM trades WHERE 1=1'
   const params = []
@@ -177,7 +170,6 @@ ipcMain.handle('trades:getAll', (_, filters = {}) => {
   if (filters.session) { query += ' AND session = ?'; params.push(filters.session) }
 
   query += ' ORDER BY COALESCE(close_time, open_time) DESC'
-
   return db.prepare(query).all(...params)
 })
 
@@ -192,42 +184,42 @@ ipcMain.handle('trades:getById', (_, id) => {
   return trade
 })
 
-ipcMain.handle('trades:create', (_, tradeData) => {
+ipcMain.handle('trades:create', (_, t) => {
   const stmt = db.prepare(`
     INSERT INTO trades (
       position_id, symbol, direction, open_time, close_time, open_price, close_price,
       volume, stop_loss, take_profit, commission, swap, pnl, pnl_pips, status,
       setup, session, tags, emotions_before, emotions_after, rating, notes,
       mistakes, lessons, followed_plan, risk_reward, risk_amount, account_balance
-    ) VALUES (
-      @position_id, @symbol, @direction, @open_time, @close_time, @open_price, @close_price,
-      @volume, @stop_loss, @take_profit, @commission, @swap, @pnl, @pnl_pips, @status,
-      @setup, @session, @tags, @emotions_before, @emotions_after, @rating, @notes,
-      @mistakes, @lessons, @followed_plan, @risk_reward, @risk_amount, @account_balance
-    )
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
-  const data = {
-    ...tradeData,
-    tags: JSON.stringify(tradeData.tags || []),
-    emotions_before: JSON.stringify(tradeData.emotions_before || []),
-    emotions_after: JSON.stringify(tradeData.emotions_after || []),
-  }
-  const result = stmt.run(data)
-  return { id: result.lastInsertRowid, ...tradeData }
+  const result = stmt.run(
+    t.position_id ?? null, t.symbol, t.direction, t.open_time,
+    t.close_time ?? null, t.open_price, t.close_price ?? null,
+    t.volume, t.stop_loss ?? null, t.take_profit ?? null,
+    t.commission ?? 0, t.swap ?? 0, t.pnl ?? null, t.pnl_pips ?? null,
+    t.status ?? 'closed', t.setup ?? null, t.session ?? null,
+    JSON.stringify(t.tags || []),
+    JSON.stringify(t.emotions_before || []),
+    JSON.stringify(t.emotions_after || []),
+    t.rating ?? null, t.notes ?? '', t.mistakes ?? '', t.lessons ?? '',
+    t.followed_plan ? 1 : 0,
+    t.risk_reward ?? null, t.risk_amount ?? null, t.account_balance ?? null
+  )
+  return { id: result.lastInsertRowid, ...t }
 })
 
 ipcMain.handle('trades:update', (_, { id, ...updates }) => {
-  const fields = Object.keys(updates).map(k => `${k} = @${k}`).join(', ')
-  const data = { ...updates, id }
-  if (data.tags && Array.isArray(data.tags)) data.tags = JSON.stringify(data.tags)
-  if (data.emotions_before && Array.isArray(data.emotions_before)) data.emotions_before = JSON.stringify(data.emotions_before)
-  if (data.emotions_after && Array.isArray(data.emotions_after)) data.emotions_after = JSON.stringify(data.emotions_after)
-  db.prepare(`UPDATE trades SET ${fields}, updated_at = datetime('now') WHERE id = @id`).run(data)
+  if (Array.isArray(updates.tags)) updates.tags = JSON.stringify(updates.tags)
+  if (Array.isArray(updates.emotions_before)) updates.emotions_before = JSON.stringify(updates.emotions_before)
+  if (Array.isArray(updates.emotions_after)) updates.emotions_after = JSON.stringify(updates.emotions_after)
+
+  const fields = Object.keys(updates).map(k => `${k} = ?`).join(', ')
+  db.prepare(`UPDATE trades SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...Object.values(updates), id)
   return { success: true }
 })
 
 ipcMain.handle('trades:delete', (_, id) => {
-  // Delete associated images from disk
   const images = db.prepare('SELECT filename FROM trade_images WHERE trade_id = ?').all(id)
   images.forEach(img => {
     const imgPath = path.join(imagesPath, img.filename)
@@ -241,21 +233,28 @@ ipcMain.handle('trades:bulkImport', (_, tradesArray) => {
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO trades (
       position_id, symbol, direction, open_time, close_time, open_price, close_price,
-      volume, stop_loss, take_profit, commission, swap, pnl, status
-    ) VALUES (
-      @position_id, @symbol, @direction, @open_time, @close_time, @open_price, @close_price,
-      @volume, @stop_loss, @take_profit, @commission, @swap, @pnl, @status
-    )
+      volume, stop_loss, take_profit, commission, swap, pnl, status, session, tags
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
-  const insertMany = db.transaction((trades) => {
-    let imported = 0
-    for (const trade of trades) {
-      const result = stmt.run(trade)
+  db.exec('BEGIN')
+  let imported = 0
+  try {
+    for (const t of tradesArray) {
+      const result = stmt.run(
+        t.position_id ?? null, t.symbol, t.direction, t.open_time,
+        t.close_time ?? null, t.open_price, t.close_price ?? null,
+        t.volume, t.stop_loss ?? null, t.take_profit ?? null,
+        t.commission ?? 0, t.swap ?? 0, t.pnl ?? null,
+        t.status ?? 'closed', t.session ?? null, t.tags ?? '[]'
+      )
       if (result.changes > 0) imported++
     }
-    return imported
-  })
-  return { imported: insertMany(tradesArray) }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+  return { imported }
 })
 
 // --- IMAGES ---
@@ -264,9 +263,9 @@ ipcMain.handle('images:save', async (_, { tradeId, filePath, type, timeframe, no
   const filename = `trade_${tradeId}_${Date.now()}${ext}`
   const destPath = path.join(imagesPath, filename)
   fs.copyFileSync(filePath, destPath)
-
-  const stmt = db.prepare('INSERT INTO trade_images (trade_id, filename, original_name, type, timeframe, notes) VALUES (?, ?, ?, ?, ?, ?)')
-  const result = stmt.run(tradeId, filename, originalName || filename, type || 'chart', timeframe || '', notes || '')
+  const result = db.prepare(
+    'INSERT INTO trade_images (trade_id, filename, original_name, type, timeframe, notes) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(tradeId, filename, originalName || filename, type || 'chart', timeframe || '', notes || '')
   return { id: result.lastInsertRowid, filename, path: destPath }
 })
 
@@ -280,104 +279,69 @@ ipcMain.handle('images:delete', (_, imageId) => {
   return { success: true }
 })
 
-ipcMain.handle('images:getPath', (_, filename) => {
-  return path.join(imagesPath, filename)
-})
+ipcMain.handle('images:getPath', (_, filename) => path.join(imagesPath, filename))
 
 // --- STATS ---
 ipcMain.handle('stats:getSummary', (_, filters = {}) => {
-  let whereClause = "WHERE status = 'closed'"
-  const params = []
-
-  if (filters.dateFrom) { whereClause += ' AND close_time >= ?'; params.push(filters.dateFrom) }
-  if (filters.dateTo) { whereClause += ' AND close_time <= ?'; params.push(filters.dateTo) }
-  if (filters.symbol) { whereClause += ' AND symbol LIKE ?'; params.push(`%${filters.symbol}%`) }
+  let w = "WHERE status = 'closed'"
+  const p = []
+  if (filters.dateFrom) { w += ' AND close_time >= ?'; p.push(filters.dateFrom) }
+  if (filters.dateTo) { w += ' AND close_time <= ?'; p.push(filters.dateTo) }
+  if (filters.symbol) { w += ' AND symbol LIKE ?'; p.push(`%${filters.symbol}%`) }
 
   const stats = db.prepare(`
-    SELECT
-      COUNT(*) as total_trades,
+    SELECT COUNT(*) as total_trades,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
       SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades,
-      SUM(CASE WHEN pnl = 0 THEN 1 ELSE 0 END) as breakeven_trades,
-      SUM(pnl) as total_pnl,
-      AVG(pnl) as avg_pnl,
-      MAX(pnl) as best_trade,
-      MIN(pnl) as worst_trade,
+      SUM(pnl) as total_pnl, AVG(pnl) as avg_pnl,
+      MAX(pnl) as best_trade, MIN(pnl) as worst_trade,
       AVG(CASE WHEN pnl > 0 THEN pnl END) as avg_win,
       AVG(CASE WHEN pnl < 0 THEN pnl END) as avg_loss,
       SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) as gross_profit,
       SUM(CASE WHEN pnl < 0 THEN pnl ELSE 0 END) as gross_loss,
       AVG(risk_reward) as avg_rr,
-      SUM(commission) as total_commission,
-      SUM(swap) as total_swap
-    FROM trades ${whereClause}
-  `).get(...params)
+      SUM(commission) as total_commission, SUM(swap) as total_swap
+    FROM trades ${w}
+  `).get(...p)
 
-  // By symbol
   const bySymbol = db.prepare(`
-    SELECT symbol,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl,
-      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate,
-      AVG(pnl) as avg_pnl
-    FROM trades ${whereClause}
-    GROUP BY symbol ORDER BY total_pnl DESC
-  `).all(...params)
+    SELECT symbol, COUNT(*) as trades, SUM(pnl) as total_pnl,
+      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate, AVG(pnl) as avg_pnl
+    FROM trades ${w} GROUP BY symbol ORDER BY total_pnl DESC
+  `).all(...p)
 
-  // By setup
   const bySetup = db.prepare(`
-    SELECT setup,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl,
+    SELECT setup, COUNT(*) as trades, SUM(pnl) as total_pnl,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate
-    FROM trades ${whereClause} AND setup IS NOT NULL
-    GROUP BY setup ORDER BY total_pnl DESC
-  `).all(...params)
+    FROM trades ${w} AND setup IS NOT NULL GROUP BY setup ORDER BY total_pnl DESC
+  `).all(...p)
 
-  // By session
   const bySession = db.prepare(`
-    SELECT session,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl,
+    SELECT session, COUNT(*) as trades, SUM(pnl) as total_pnl,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate
-    FROM trades ${whereClause} AND session IS NOT NULL
-    GROUP BY session ORDER BY total_pnl DESC
-  `).all(...params)
+    FROM trades ${w} AND session IS NOT NULL GROUP BY session ORDER BY total_pnl DESC
+  `).all(...p)
 
-  // Daily PnL for equity curve
   const dailyPnl = db.prepare(`
     SELECT DATE(close_time) as date, SUM(pnl) as pnl, COUNT(*) as trades
-    FROM trades ${whereClause}
-    GROUP BY DATE(close_time) ORDER BY date ASC
-  `).all(...params)
+    FROM trades ${w} GROUP BY DATE(close_time) ORDER BY date ASC
+  `).all(...p)
 
-  // By direction
   const byDirection = db.prepare(`
-    SELECT direction,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl,
+    SELECT direction, COUNT(*) as trades, SUM(pnl) as total_pnl,
       SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate
-    FROM trades ${whereClause}
-    GROUP BY direction
-  `).all(...params)
+    FROM trades ${w} GROUP BY direction
+  `).all(...p)
 
-  // By day of week
   const byDayOfWeek = db.prepare(`
-    SELECT strftime('%w', close_time) as dow,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl
-    FROM trades ${whereClause}
-    GROUP BY dow ORDER BY dow
-  `).all(...params)
+    SELECT strftime('%w', close_time) as dow, COUNT(*) as trades, SUM(pnl) as total_pnl
+    FROM trades ${w} GROUP BY dow ORDER BY dow
+  `).all(...p)
 
-  // By hour
   const byHour = db.prepare(`
-    SELECT strftime('%H', close_time) as hour,
-      COUNT(*) as trades,
-      SUM(pnl) as total_pnl
-    FROM trades ${whereClause}
-    GROUP BY hour ORDER BY hour
-  `).all(...params)
+    SELECT strftime('%H', close_time) as hour, COUNT(*) as trades, SUM(pnl) as total_pnl
+    FROM trades ${w} GROUP BY hour ORDER BY hour
+  `).all(...p)
 
   return { stats, bySymbol, bySetup, bySession, dailyPnl, byDirection, byDayOfWeek, byHour }
 })
@@ -390,8 +354,8 @@ ipcMain.handle('account:get', () => {
 ipcMain.handle('account:update', (_, data) => {
   const account = db.prepare('SELECT id FROM account_settings LIMIT 1').get()
   if (account) {
-    const fields = Object.keys(data).map(k => `${k} = @${k}`).join(', ')
-    db.prepare(`UPDATE account_settings SET ${fields} WHERE id = ${account.id}`).run(data)
+    const fields = Object.keys(data).map(k => `${k} = ?`).join(', ')
+    db.prepare(`UPDATE account_settings SET ${fields} WHERE id = ?`).run(...Object.values(data), account.id)
   }
   return { success: true }
 })
@@ -414,39 +378,35 @@ ipcMain.handle('dailyNotes:get', (_, date) => {
 ipcMain.handle('dailyNotes:save', (_, data) => {
   db.prepare(`
     INSERT INTO daily_notes (date, market_conditions, pre_market_notes, post_market_notes, mood)
-    VALUES (@date, @market_conditions, @pre_market_notes, @post_market_notes, @mood)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(date) DO UPDATE SET
-      market_conditions = @market_conditions,
-      pre_market_notes = @pre_market_notes,
-      post_market_notes = @post_market_notes,
-      mood = @mood
-  `).run(data)
+      market_conditions = excluded.market_conditions,
+      pre_market_notes = excluded.pre_market_notes,
+      post_market_notes = excluded.post_market_notes,
+      mood = excluded.mood
+  `).run(data.date, data.market_conditions || '', data.pre_market_notes || '', data.post_market_notes || '', data.mood || 'neutral')
   return { success: true }
 })
 
-// --- FILE DIALOGS ---
+// --- DIALOGS ---
 ipcMain.handle('dialog:openFile', async (_, options) => {
-  const result = await dialog.showOpenDialog(mainWindow, options)
-  return result
+  return dialog.showOpenDialog(mainWindow, options)
 })
 
 ipcMain.handle('dialog:openImage', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  return dialog.showOpenDialog(mainWindow, {
     filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }],
     properties: ['openFile', 'multiSelections'],
   })
-  return result
 })
 
 ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))
-
 ipcMain.handle('app:getVersion', () => app.getVersion())
 
 // ============ APP LIFECYCLE ============
 app.whenReady().then(() => {
   initDatabase()
   createWindow()
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
