@@ -11,6 +11,7 @@
     "electron": "electron ."
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "date-fns": "^3.3.1",
     "papaparse": "^5.4.1",
     "react": "^18.2.0",
@@ -60,7 +61,9 @@
       {
         "from": "data/",
         "to": "data/",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

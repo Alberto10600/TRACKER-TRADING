@@ -12,6 +12,7 @@ import NewTrade from './components/TradeLog/NewTrade'
 import ExportData from './components/Export/ExportData'
 import PerformanceReport from './components/Export/PerformanceReport'
 import PositionSizer from './components/Tools/PositionSizer'
+import TradingAnalyst from './components/Analyst/TradingAnalyst'
 
 export default function App() {
   const [account, setAccount] = useState(null)
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/export" element={<ExportData />} />
           <Route path="/report" element={<PerformanceReport />} />
           <Route path="/tools" element={<PositionSizer />} />
+          <Route path="/analyst" element={<TradingAnalyst />} />
         </Routes>
       </main>
     </div>

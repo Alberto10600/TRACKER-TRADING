@@ -62,4 +62,11 @@ contextBridge.exposeInMainWorld('api', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
   },
+  claude: {
+    getKey: () => ipcRenderer.invoke('claude:getKey'),
+    saveKey: (key) => ipcRenderer.invoke('claude:saveKey', key),
+    analyze: (payload) => ipcRenderer.invoke('claude:analyze', payload),
+    onChunk: (callback) => ipcRenderer.on('claude:chunk', (_, data) => callback(data)),
+    removeChunkListeners: () => ipcRenderer.removeAllListeners('claude:chunk'),
+  },
 })

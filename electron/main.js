@@ -505,6 +505,92 @@ ipcMain.handle('dialog:openImage', async () => dialog.showOpenDialog(mainWindow,
 ipcMain.handle('shell:openExternal', (_, url) => shell.openExternal(url))
 ipcMain.handle('app:getVersion', () => app.getVersion())
 
+// ============ CLAUDE AI ANALYST ============
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json')
+
+function readConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) return {}
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))
+  } catch { return {} }
+}
+
+function writeConfig(data) {
+  const current = readConfig()
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...current, ...data }, null, 2), 'utf8')
+}
+
+ipcMain.handle('claude:getKey', () => readConfig().anthropic_api_key || null)
+
+ipcMain.handle('claude:saveKey', (_, key) => {
+  writeConfig({ anthropic_api_key: key })
+  return { success: true }
+})
+
+const TRADING_SYSTEM_PROMPT = `You are an elite ICT (Inner Circle Trader) / Smart Money Concepts trading analyst specializing exclusively in XAUUSD (Gold) and US100 (NASDAQ 100).
+
+Your methodology:
+- **Market Structure**: HH/HL = bullish, LH/LL = bearish. Identify CHoCH (Change of Character) and BOS (Break of Structure).
+- **Key Levels**: Order Blocks (OBs), Fair Value Gaps (FVGs/Imbalances), Liquidity pools (equal highs/lows, previous session H/L, swing points), Supply & Demand zones.
+- **Sessions**: Asian (00:00-08:00 UTC) range building; London (07:00-11:00 UTC) liquidity hunts & trend initiation; New York (12:00-17:00 UTC) major moves & reversals, NY Open kill zone 13:30-15:00 UTC.
+- **Entry Models**: OTE (Optimal Trade Entry) at 61.8–79% Fibonacci retracement, Breaker Blocks, Mitigation Blocks, FVG entries with confluence.
+- **Risk Management**: SL below/above Order Block or key structure. Minimum 1:2 RR. TP at next liquidity pool or key level.
+
+Instrument specifics:
+- **XAUUSD (Gold)**: Inverse correlation with DXY. Highly sensitive to CPI, NFP, Fed speeches. Safe-haven spikes on geopolitical risk. Watch for London and NY open setups. Typical SL: 8-20 points minimum.
+- **US100 (NASDAQ)**: Risk-on asset, correlates with tech sentiment. Sensitive to Fed rate decisions, tech earnings. Watch DXY for direction. Typical SL: 30-80 points minimum.
+
+Always structure your analysis with these sections:
+1. **BIAS** (Bullish / Bearish / Neutral + Confidence 1-10)
+2. **Market Structure** (current structure, recent CHoCH/BOS)
+3. **Key Levels** (exact price levels for OBs, FVGs, liquidity, support/resistance)
+4. **Trade Setup** (Direction, Entry Zone, Stop Loss, TP1/TP2/TP3, R:R)
+5. **Session Notes** (what to watch for current/upcoming session)
+6. **Warnings** (news events, countertrend risks, invalidation level)
+
+Be precise with price levels. Be direct and actionable. If information is insufficient, ask specific follow-up questions.`
+
+ipcMain.handle('claude:analyze', async (event, { apiKey, messages, instrument }) => {
+  let Anthropic
+  try {
+    Anthropic = require('@anthropic-ai/sdk')
+  } catch (e) {
+    event.sender.send('claude:chunk', { type: 'error', message: 'SDK no instalado. Ejecuta: npm install @anthropic-ai/sdk' })
+    return { success: false }
+  }
+
+  const client = new Anthropic.default({ apiKey })
+  const systemPrompt = `${TRADING_SYSTEM_PROMPT}\n\nInstrument activo: **${instrument}**`
+
+  try {
+    const stream = await client.messages.stream({
+      model: 'claude-opus-4-6',
+      max_tokens: 4096,
+      thinking: { type: 'adaptive' },
+      system: systemPrompt,
+      messages,
+    })
+
+    for await (const chunk of stream) {
+      if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('claude:chunk', { type: 'text', content: chunk.delta.text })
+        }
+      }
+    }
+
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('claude:chunk', { type: 'done' })
+    }
+    return { success: true }
+  } catch (err) {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('claude:chunk', { type: 'error', message: err.message })
+    }
+    return { success: false, error: err.message }
+  }
+})
+
 // ============ APP LIFECYCLE ============
 app.whenReady().then(() => {
   initDefaults()
