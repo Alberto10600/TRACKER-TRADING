@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk'
-import type { Perfil, HorarioDia, MenuSemanal, DiaMenu, ComidaMenu } from './types'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import type { Perfil, HorarioDia, MenuSemanal, DiaMenu } from './types'
 import { DIAS_SEMANA } from './db'
 import { v4 as uuidv4 } from 'uuid'
 
-const client = new Anthropic()
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 // ── Genera menú semanal con streaming ────────────────────────────────────────
 
@@ -71,8 +71,8 @@ Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
         },
         "perfiles_objetivo": ["id1", "id2"]
       },
-      "comida": { ... },
-      "cena": { ... }
+      "comida": {},
+      "cena": {}
     }
   ]
 }
@@ -81,27 +81,13 @@ Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
 Solo incluye la comida si está planificada (casa). Si es "tupper" o "fuera" o "skip", omite ese campo del día.
 Los IDs de perfiles_objetivo son: ${perfilesActivos.map(p => `${p.id} (${p.nombre})`).join(', ')}`
 
-  const stream = client.messages.stream({
-    model: 'claude-opus-4-6',
-    max_tokens: 16000,
-    thinking: { type: 'adaptive' },
-    system: 'Eres un nutricionista y chef experto. Siempre respondes con JSON válido y completo.',
-    messages: [{ role: 'user', content: prompt }],
-  })
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+  const result = await model.generateContentStream(prompt)
 
-  let fullText = ''
-
-  for await (const event of stream) {
-    if (
-      event.type === 'content_block_delta' &&
-      event.delta.type === 'text_delta'
-    ) {
-      fullText += event.delta.text
-      yield event.delta.text
-    }
+  for await (const chunk of result.stream) {
+    const text = chunk.text()
+    if (text) yield text
   }
-
-  return fullText
 }
 
 // ── Parsea el JSON del menú generado ─────────────────────────────────────────
@@ -122,4 +108,3 @@ export function parsearMenuJSON(texto: string, semana: string): MenuSemanal | nu
     return null
   }
 }
-
