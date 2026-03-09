@@ -71,9 +71,9 @@ function initDefaults() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1200, minHeight: 700,
-    backgroundColor: '#0a0e1a',
+    backgroundColor: '#0f0e0d',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#0a0e1a', symbolColor: '#94a3b8', height: 38 },
+    titleBarOverlay: { color: '#181614', symbolColor: '#9e9890', height: 38 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

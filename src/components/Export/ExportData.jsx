@@ -1,11 +1,15 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 export default function ExportData() {
+  const navigate = useNavigate()
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [status, setStatus] = useState('closed')
   const [exporting, setExporting] = useState(false)
   const [done, setDone] = useState(false)
+  const [reportFrom, setReportFrom] = useState('')
+  const [reportTo, setReportTo] = useState('')
 
   async function handleExport() {
     setExporting(true)
@@ -87,6 +91,49 @@ export default function ExportData() {
               ) : (
                 'Descargar CSV'
               )}
+            </button>
+          </div>
+        </div>
+
+        {/* Performance Report */}
+        <div className="card space-y-5">
+          <div>
+            <h2 className="text-text-primary font-semibold border-b border-border pb-2">Informe de Rendimiento PDF</h2>
+            <p className="text-text-muted text-xs mt-2">
+              Genera un informe profesional con KPIs, desglose mensual, rendimiento por símbolo y setup. Se abre una previsualización desde la que puedes guardar como PDF.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-text-muted text-xs block mb-1">Fecha desde</label>
+              <input type="date" className="input w-full" value={reportFrom} onChange={e => setReportFrom(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-text-muted text-xs block mb-1">Fecha hasta</label>
+              <input type="date" className="input w-full" value={reportTo} onChange={e => setReportTo(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="bg-bg-tertiary rounded-xl p-4 text-xs text-text-muted space-y-1">
+            <p className="text-text-secondary font-medium text-sm mb-1">Contenido del informe:</p>
+            <p>· Resumen de KPIs: P&L, Win Rate, Profit Factor, Expectativa, Max Drawdown, Recovery Factor</p>
+            <p>· Estadísticas detalladas: rachas, comisiones, tiempos, días activos</p>
+            <p>· Desglose mensual con barras de P&L</p>
+            <p>· Rendimiento por símbolo, setup y sesión</p>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              onClick={() => {
+                const params = new URLSearchParams()
+                if (reportFrom) params.set('from', reportFrom)
+                if (reportTo) params.set('to', reportTo)
+                navigate(`/report?${params.toString()}`)
+              }}
+              className="btn-primary px-6"
+            >
+              Ver Informe →
             </button>
           </div>
         </div>

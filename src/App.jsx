@@ -10,6 +10,7 @@ import ImportXTB from './components/Import/ImportXTB'
 import Settings from './components/Settings/Settings'
 import NewTrade from './components/TradeLog/NewTrade'
 import ExportData from './components/Export/ExportData'
+import PerformanceReport from './components/Export/PerformanceReport'
 import PositionSizer from './components/Tools/PositionSizer'
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/import" element={<ImportXTB />} />
           <Route path="/settings" element={<Settings account={account} setAccount={setAccount} />} />
           <Route path="/export" element={<ExportData />} />
+          <Route path="/report" element={<PerformanceReport />} />
           <Route path="/tools" element={<PositionSizer />} />
         </Routes>
       </main>
