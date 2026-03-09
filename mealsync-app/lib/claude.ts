@@ -1,9 +1,9 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { Perfil, HorarioDia, MenuSemanal, DiaMenu } from './types'
 import { DIAS_SEMANA } from './db'
 import { v4 as uuidv4 } from 'uuid'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY!
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`
 
 // ── Genera menú semanal con streaming ────────────────────────────────────────
 
@@ -81,12 +81,40 @@ Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
 Solo incluye la comida si está planificada (casa). Si es "tupper" o "fuera" o "skip", omite ese campo del día.
 Los IDs de perfiles_objetivo son: ${perfilesActivos.map(p => `${p.id} (${p.nombre})`).join(', ')}`
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
-  const result = await model.generateContentStream(prompt)
+  const res = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 8192 },
+    }),
+  })
 
-  for await (const chunk of result.stream) {
-    const text = chunk.text()
-    if (text) yield text
+  if (!res.ok || !res.body) {
+    const err = await res.text()
+    throw new Error(`Gemini API error: ${err}`)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    const lines = decoder.decode(value).split('\n')
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') continue
+      try {
+        const json = JSON.parse(data)
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text
+        if (text) yield text
+      } catch {
+        // ignorar líneas no JSON
+      }
+    }
   }
 }
 
