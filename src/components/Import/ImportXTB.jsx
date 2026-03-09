@@ -175,11 +175,22 @@ export default function ImportXTB() {
             {parsed.errors.length > 0 && (
               <div className="card border-loss/20">
                 <p className="text-loss text-sm font-semibold mb-2">⚠️ {parsed.errors.length} filas con errores (se omitirán)</p>
-                <div className="max-h-32 overflow-y-auto space-y-1">
-                  {parsed.errors.slice(0, 5).map((e, i) => (
-                    <p key={i} className="text-text-muted text-xs">Fila {e.row}: {e.message}</p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {parsed.errors.slice(0, 10).map((e, i) => (
+                    <p key={i} className="text-text-muted text-xs font-mono whitespace-pre-wrap">Fila {e.row}: {e.message}</p>
                   ))}
+                  {parsed.errors.length > 10 && (
+                    <p className="text-text-muted text-xs italic">… y {parsed.errors.length - 10} errores más</p>
+                  )}
                 </div>
+              </div>
+            )}
+
+            {/* No trades warning */}
+            {parsed.trades.length === 0 && parsed.errors.length === 0 && (
+              <div className="card border-neutral/20">
+                <p className="text-neutral text-sm font-semibold">⚠️ No se encontraron operaciones en el archivo.</p>
+                <p className="text-text-muted text-xs mt-1">Verifica que el archivo sea el historial correcto de XTB con posiciones cerradas.</p>
               </div>
             )}
 

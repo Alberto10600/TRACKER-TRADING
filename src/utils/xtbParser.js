@@ -189,63 +189,92 @@ export function parseXTBXLSX(buffer) {
 
   const ws = wb.Sheets[sheetName]
 
-  // Read all rows as plain arrays to locate the actual header row
-  const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' })
+  // Read as strings for header detection
+  const allRowsStr = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })
+  // Read as raw values (Date objects, numbers) for actual data
+  const allRowsRaw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, cellDates: true, defval: null })
 
   // Find the row that contains actual column headers (has ≥2 known keywords)
-  const headerKeywords = ['instrument', 'position', 'type', 'volume', 'symbol', 'ticker', 'open price', 'close price']
+  const headerKeywords = ['instrument', 'position', 'type', 'volume', 'symbol', 'ticker', 'open price', 'close price', 'open time', 'close time', 'profit']
   let headerRowIdx = -1
-  for (let i = 0; i < Math.min(allRows.length, 20); i++) {
-    const row = allRows[i]
+  for (let i = 0; i < Math.min(allRowsStr.length, 25); i++) {
+    const row = allRowsStr[i]
     if (!row || !row.length) continue
     const rowStr = row.map(c => String(c || '').toLowerCase()).join('|')
     const matches = headerKeywords.filter(kw => rowStr.includes(kw)).length
-    if (matches >= 2) { headerRowIdx = i; break }
+    if (matches >= 3) { headerRowIdx = i; break }
   }
 
   if (headerRowIdx === -1) {
-    return { trades: [], errors: [{ row: 0, message: 'No se encontraron las columnas de XTB. Verifica que el archivo sea correcto.' }], total: 0 }
+    // Try with lower threshold
+    for (let i = 0; i < Math.min(allRowsStr.length, 25); i++) {
+      const row = allRowsStr[i]
+      if (!row || !row.length) continue
+      const rowStr = row.map(c => String(c || '').toLowerCase()).join('|')
+      const matches = headerKeywords.filter(kw => rowStr.includes(kw)).length
+      if (matches >= 2) { headerRowIdx = i; break }
+    }
   }
 
-  const headers = allRows[headerRowIdx].map(h => String(h || '').trim())
-  const dataRows = allRows.slice(headerRowIdx + 1)
+  if (headerRowIdx === -1) {
+    const firstRows = allRowsStr.slice(0, 5).map(r => r?.join(' | ')).join('\n')
+    return { trades: [], errors: [{ row: 0, message: `No se encontraron las columnas de XTB. Primeras filas detectadas:\n${firstRows}` }], total: 0 }
+  }
+
+  // Use string row for header names, raw rows for data values
+  const headers = allRowsStr[headerRowIdx].map(h => String(h || '').trim())
+  const dataRowsStr = allRowsStr.slice(headerRowIdx + 1)
+  const dataRowsRaw = allRowsRaw.slice(headerRowIdx + 1)
 
   // Normalize a string: lowercase, remove all non-alphanumeric chars
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
-  for (const [index, rowArr] of dataRows.entries()) {
-    if (!rowArr || rowArr.every(c => !c)) continue // skip blank rows
+  for (const [index, rowArr] of dataRowsRaw.entries()) {
+    const rowArrStr = dataRowsStr[index] || []
+    if (!rowArr || rowArr.every(c => c === null || c === undefined || c === '')) continue // skip blank rows
 
-    // Build object { header: value }
+    // Build objects: raw for values, string for fallback
     const row = {}
-    headers.forEach((h, i) => { if (h) row[h] = rowArr[i] })
+    const rowStr = {}
+    headers.forEach((h, i) => {
+      if (h) {
+        row[h] = rowArr[i]
+        rowStr[h] = rowArrStr[i]
+      }
+    })
 
     try {
       const keys = Object.keys(row)
-      // Flexible column getter: matches by normalized name (strips spaces, parens, slashes…)
+      // Flexible column getter: matches by normalized name, prefers raw, falls back to string
       const get = (...names) => {
         for (const n of names) {
           const key = keys.find(k => norm(k) === norm(n))
-          if (key !== undefined && row[key] !== '' && row[key] !== undefined && row[key] !== null) return row[key]
+          if (key !== undefined) {
+            const rawVal = row[key]
+            const strVal = rowStr[key]
+            // Return raw value if it's a Date or meaningful number/string
+            if (rawVal instanceof Date) return rawVal
+            if (rawVal !== null && rawVal !== undefined && rawVal !== '') return rawVal
+            if (strVal !== null && strVal !== undefined && strVal !== '') return strVal
+          }
         }
         return ''
       }
 
-      // XTB exact column names (from screenshot) + common fallbacks
-      const positionId   = get('Position ID', 'Position', 'ID', 'Trade ID', 'Nº operación') || `XLSX_${index}`
-      const symbol       = get('Instrument', 'Symbol', 'Símbolo', 'Instrumento', 'Ticker')
-      const type         = String(get('Type', 'Tipo', 'Side')).toUpperCase()
-      const openTime     = parseXTBDate(get('Open Time (UTC)', 'Open Time UTC', 'Open Time', 'OpenTime', 'Hora apertura'))
-      const closeTime    = parseXTBDate(get('Close Time (UTC)', 'Close Time UTC', 'Close Time', 'CloseTime', 'Hora cierre'))
-      const openPrice    = parseNum(get('Open Price', 'OpenPrice', 'Precio apertura'))
-      const closePrice   = parseNum(get('Close Price', 'ClosePrice', 'Precio cierre'))
-      const volume       = parseNum(get('Volume', 'Volumen', 'Lots', 'Lotes'))
-      const sl           = parseNum(get('Stop Loss', 'S/L', 'SL', 'StopLoss')) || null
-      const tp           = parseNum(get('Take Profit', 'T/P', 'TP', 'TakeProfit')) || null
-      const commission   = parseNum(get('Commission', 'Comisión', 'Comision')) || 0
-      const swap         = parseNum(get('Swap', 'Financiación')) || 0
-      // XTB uses "Profit/Loss" column name
-      const profit       = parseNum(get('Profit/Loss', 'Profit', 'Beneficio', 'P&L', 'Net profit', 'ProfitLoss'))
+      // XTB exact column names + common fallbacks
+      const positionId = get('Position ID', 'Position', 'ID', 'Trade ID', 'Nº operación') || `XLSX_${index}`
+      const symbol     = get('Instrument', 'Symbol', 'Símbolo', 'Instrumento', 'Ticker')
+      const type       = String(get('Type', 'Tipo', 'Side') || '').toUpperCase()
+      const openTime   = parseXTBDate(get('Open Time (UTC)', 'Open Time UTC', 'Open Time', 'OpenTime', 'Hora apertura'))
+      const closeTime  = parseXTBDate(get('Close Time (UTC)', 'Close Time UTC', 'Close Time', 'CloseTime', 'Hora cierre'))
+      const openPrice  = parseNum(get('Open Price', 'OpenPrice', 'Precio apertura'))
+      const closePrice = parseNum(get('Close Price', 'ClosePrice', 'Precio cierre'))
+      const volume     = parseNum(get('Volume', 'Volumen', 'Lots', 'Lotes'))
+      const sl         = parseNum(get('Stop Loss', 'S/L', 'SL', 'StopLoss')) || null
+      const tp         = parseNum(get('Take Profit', 'T/P', 'TP', 'TakeProfit')) || null
+      const commission = parseNum(get('Commission', 'Comisión', 'Comision')) || 0
+      const swap       = parseNum(get('Swap', 'Financiación', 'Rollover')) || 0
+      const profit     = parseNum(get('Profit/Loss', 'Profit', 'Beneficio', 'P&L', 'Net profit', 'ProfitLoss'))
 
       if (!symbol || !openTime) {
         errors.push({ row: index + 1, message: `Symbol="${symbol}" openTime="${openTime}" — fila ignorada` })
@@ -254,7 +283,7 @@ export function parseXTBXLSX(buffer) {
 
       let direction = type.includes('SELL') || type === 'S' ? 'SELL' : 'BUY'
       const isOpen = !closeTime
-      const normalizedSymbol = normalizeSymbol(symbol)
+      const normalizedSymbol = normalizeSymbol(String(symbol))
 
       trades.push({
         position_id: String(positionId),
@@ -280,23 +309,55 @@ export function parseXTBXLSX(buffer) {
     }
   }
 
-  return { trades, errors, total: dataRows.filter(r => r && r.some(c => c)).length }
+  return { trades, errors, total: dataRowsRaw.filter(r => r && r.some(c => c !== null && c !== undefined && c !== '')).length }
 }
 
 function parseXTBDate(val) {
   if (!val) return null
-  if (val instanceof Date) return val.toISOString().replace('T', ' ').substring(0, 19)
+
+  // Date object (from XLSX cellDates:true)
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null
+    return val.toISOString().replace('T', ' ').substring(0, 19)
+  }
+
+  // Excel serial number (number of days since 1900-01-01)
+  if (typeof val === 'number') {
+    if (val < 1 || val > 2958465) return null // outside 1900–9999 range
+    // Adjust for Excel's phantom leap day (Feb 29, 1900)
+    const adjusted = val > 59 ? val - 1 : val
+    const ms = Math.round((adjusted - 25568) * 86400000)
+    const d = new Date(ms)
+    if (isNaN(d.getTime())) return null
+    return d.toISOString().replace('T', ' ').substring(0, 19)
+  }
+
   const str = String(val).trim()
   if (!str || str === '0' || str.toLowerCase() === 'nan') return null
-  // Try ISO format first
-  const d = new Date(str)
-  if (!isNaN(d)) return d.toISOString().replace('T', ' ').substring(0, 19)
-  // Try DD.MM.YYYY HH:mm:ss
-  const m = str.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):?(\d{2})?/)
-  if (m) {
-    const iso = `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6] || '00'}`
-    return iso.replace('T', ' ')
+
+  // ISO-like: 2024-01-15 09:30:00 or 2024-01-15T09:30:00
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(str)) {
+    const d = new Date(str.replace(' ', 'T').replace(/(?<!\+\d{2}:\d{2})$/, 'Z').replace('ZZ', 'Z'))
+    if (!isNaN(d.getTime())) return d.toISOString().replace('T', ' ').substring(0, 19)
   }
+
+  // DD.MM.YYYY HH:mm:ss
+  const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):?(\d{2})?/)
+  if (m1) {
+    const d = new Date(`${m1[3]}-${m1[2]}-${m1[1]}T${m1[4]}:${m1[5]}:${m1[6] || '00'}Z`)
+    if (!isNaN(d.getTime())) return d.toISOString().replace('T', ' ').substring(0, 19)
+  }
+
+  // MM/DD/YYYY HH:mm:ss or M/D/YYYY H:mm:ss
+  const m2 = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):?(\d{2})?/)
+  if (m2) {
+    const d = new Date(`${m2[3]}-${m2[1].padStart(2, '0')}-${m2[2].padStart(2, '0')}T${m2[4].padStart(2, '0')}:${m2[5]}:${m2[6] || '00'}Z`)
+    if (!isNaN(d.getTime())) return d.toISOString().replace('T', ' ').substring(0, 19)
+  }
+
+  // Fallback: native Date parse
+  const d = new Date(str)
+  if (!isNaN(d.getTime())) return d.toISOString().replace('T', ' ').substring(0, 19)
   return null
 }
 
