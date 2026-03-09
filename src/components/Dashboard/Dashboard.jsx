@@ -31,9 +31,15 @@ export default function Dashboard({ account }) {
   const [period, setPeriod] = useState('30d')
   const [trades, setTrades] = useState([])
   const [loading, setLoading] = useState(true)
+  const [goals, setGoals] = useState(null)
+  const [dailyLossAlert, setDailyLossAlert] = useState(null)
 
   useEffect(() => {
     loadData()
+    window.api.goals?.get().then(setGoals)
+    window.api.stats_extra?.getDailyPnl().then(data => {
+      if (data) setDailyLossAlert(data)
+    })
   }, [period])
 
   async function loadData() {
@@ -48,6 +54,12 @@ export default function Dashboard({ account }) {
   const equityCurve = buildEquityCurve(trades, account?.initial_balance || 10000)
   const dailyPnl = buildDailyPnl(trades)
   const currency = account?.currency || 'EUR'
+
+  const closedTrades = trades.filter(t => t.status === 'closed' && t.open_time && t.close_time)
+  const holdingTimes = closedTrades.map(t => (new Date(t.close_time) - new Date(t.open_time)) / 60000)
+  const avgHoldingTime = holdingTimes.length > 0 ? holdingTimes.reduce((a, b) => a + b, 0) / holdingTimes.length : 0
+  const tradingDays = new Set(closedTrades.map(t => t.close_time?.substring(0, 10)).filter(Boolean))
+  const tradesPerDay = tradingDays.size > 0 ? closedTrades.length / tradingDays.size : 0
 
   const recentTrades = [...trades]
     .filter(t => t.status === 'closed')
@@ -152,6 +164,86 @@ export default function Dashboard({ account }) {
             />
           </div>
 
+          {/* Daily Loss Alert */}
+          {dailyLossAlert && account?.max_daily_loss && account?.initial_balance && (() => {
+            const maxLoss = -(account.initial_balance * account.max_daily_loss / 100)
+            const pct = Math.min(100, Math.abs(dailyLossAlert.pnl / maxLoss) * 100)
+            const isWarning = pct >= 70
+            const isBreached = dailyLossAlert.pnl <= maxLoss
+            if (!isBreached && !isWarning) return null
+            return (
+              <div className={`card border ${isBreached ? 'border-loss/40 bg-loss/5' : 'border-neutral/30 bg-neutral/5'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-sm font-semibold ${isBreached ? 'text-loss' : 'text-neutral'}`}>
+                      {isBreached ? '⛔ Límite de pérdida diaria alcanzado' : '⚠️ Acercándose al límite diario'}
+                    </p>
+                    <p className="text-text-muted text-xs mt-0.5">
+                      P&L hoy: <span className={`font-num font-semibold ${dailyLossAlert.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                        {dailyLossAlert.pnl >= 0 ? '+' : ''}{dailyLossAlert.pnl.toFixed(2)} {account.currency}
+                      </span>
+                      {' '}· Límite: <span className="font-num text-text-secondary">{maxLoss.toFixed(2)} {account.currency}</span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-2xl font-bold font-num ${isBreached ? 'text-loss' : 'text-neutral'}`}>{pct.toFixed(0)}%</p>
+                    <p className="text-text-muted text-xs">del límite</p>
+                  </div>
+                </div>
+                <div className="mt-2 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${isBreached ? 'bg-loss' : 'bg-neutral'}`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Monthly Goals */}
+          {goals && (goals.monthly_pnl || goals.win_rate) && (() => {
+            const thisMonth = new Date().toISOString().substring(0, 7)
+            const monthTrades = trades.filter(t => t.close_time?.startsWith(thisMonth) && t.status === 'closed')
+            const monthPnl = monthTrades.reduce((s, t) => s + (t.pnl || 0), 0)
+            const monthWins = monthTrades.filter(t => t.pnl > 0).length
+            const monthWinRate = monthTrades.length > 0 ? (monthWins / monthTrades.length) * 100 : 0
+            const pnlPct = goals.monthly_pnl ? Math.min(100, (monthPnl / goals.monthly_pnl) * 100) : 0
+            const wrPct = goals.win_rate ? Math.min(100, (monthWinRate / goals.win_rate) * 100) : 0
+            return (
+              <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-text-primary font-semibold">Objetivos del Mes</h2>
+                  <span className="text-text-muted text-xs">{new Date().toLocaleString('es', { month: 'long', year: 'numeric' })}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {goals.monthly_pnl && (
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-text-secondary">P&L objetivo</span>
+                        <span className="font-num text-text-primary">{monthPnl.toFixed(0)} / {goals.monthly_pnl} {currency}</span>
+                      </div>
+                      <div className="h-2 bg-bg-tertiary rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${pnlPct >= 100 ? 'bg-profit' : pnlPct >= 50 ? 'bg-accent-blue' : 'bg-text-muted'}`}
+                          style={{ width: `${Math.max(0, pnlPct)}%` }} />
+                      </div>
+                      <p className={`text-xs font-num mt-1 ${pnlPct >= 100 ? 'text-profit' : 'text-text-muted'}`}>{pnlPct.toFixed(0)}% completado</p>
+                    </div>
+                  )}
+                  {goals.win_rate && (
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-text-secondary">Win Rate objetivo</span>
+                        <span className="font-num text-text-primary">{monthWinRate.toFixed(1)} / {goals.win_rate}%</span>
+                      </div>
+                      <div className="h-2 bg-bg-tertiary rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${wrPct >= 100 ? 'bg-profit' : wrPct >= 50 ? 'bg-accent-blue' : 'bg-text-muted'}`}
+                          style={{ width: `${wrPct}%` }} />
+                      </div>
+                      <p className={`text-xs font-num mt-1 ${wrPct >= 100 ? 'text-profit' : 'text-text-muted'}`}>{wrPct.toFixed(0)}% completado</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Equity Curve */}
           <div className="card">
             <div className="flex items-center justify-between mb-4">
@@ -231,6 +323,19 @@ export default function Dashboard({ account }) {
               <StatRow label="Avg perdedora" value={<span className="text-loss font-num">{formatCurrency(-metrics.avgLoss, currency)}</span>} />
               <StatRow label="Comisiones" value={<span className="text-neutral font-num">{formatCurrency(trades.reduce((s,t)=>s+(t.commission||0),0), currency)}</span>} />
               <StatRow label="Swaps" value={<span className="font-num text-text-secondary">{formatCurrency(trades.reduce((s,t)=>s+(t.swap||0),0), currency)}</span>} />
+              <div className="pt-2 border-t border-border">
+                <p className="text-text-muted text-xs mb-2">Tiempo en mercado</p>
+                <StatRow label="Avg duración" value={
+                  <span className="font-num text-text-secondary">
+                    {avgHoldingTime > 0
+                      ? avgHoldingTime >= 60
+                        ? `${(avgHoldingTime/60).toFixed(1)}h`
+                        : `${avgHoldingTime.toFixed(0)}min`
+                      : '—'}
+                  </span>
+                } />
+                <StatRow label="Trades/día" value={<span className="font-num text-text-secondary">{tradesPerDay > 0 ? tradesPerDay.toFixed(1) : '—'}</span>} />
+              </div>
             </div>
           </div>
 

@@ -32,6 +32,7 @@ export default function TradeLog() {
   const [setup, setSetup] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [instrType, setInstrType] = useState('')
   const [sortField, setSortField] = useState('close_time')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -41,7 +42,7 @@ export default function TradeLog() {
 
   useEffect(() => {
     loadTrades()
-  }, [direction, status, session, setup, dateFrom, dateTo])
+  }, [direction, status, session, setup, dateFrom, dateTo, instrType])
 
   async function loadSetups() {
     const s = await window.api.setups.getAll()
@@ -57,6 +58,7 @@ export default function TradeLog() {
     if (setup) filters.setup = setup
     if (dateFrom) filters.dateFrom = dateFrom
     if (dateTo) filters.dateTo = dateTo
+    if (instrType) filters.instrument_type = instrType
 
     const data = await window.api.trades.getAll(filters)
     setTrades(data)
@@ -148,10 +150,18 @@ export default function TradeLog() {
           <option value="">Todos los Setups</option>
           {setups.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
         </select>
+        <select className="input" value={instrType} onChange={e => setInstrType(e.target.value)}>
+          <option value="">Todos los Tipos</option>
+          <option value="forex">Forex</option>
+          <option value="commodity">Commodities</option>
+          <option value="index">Índices</option>
+          <option value="crypto">Crypto</option>
+          <option value="stock">Acciones</option>
+        </select>
         <input type="date" className="input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <span className="text-text-muted text-xs">—</span>
         <input type="date" className="input" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        <button onClick={() => { setSearch(''); setDirection('Todos'); setStatus('closed'); setSession('Todas'); setSetup(''); setDateFrom(''); setDateTo('') }}
+        <button onClick={() => { setSearch(''); setDirection('Todos'); setStatus('closed'); setSession('Todas'); setSetup(''); setInstrType(''); setDateFrom(''); setDateTo('') }}
           className="text-text-muted text-xs hover:text-text-primary transition-colors">
           Limpiar
         </button>
@@ -193,9 +203,10 @@ export default function TradeLog() {
                 <SortTh field="volume" current={sortField} dir={sortDir} onSort={toggleSort}>Vol.</SortTh>
                 <th>SL</th>
                 <th>TP</th>
-                <th>R</th>
+                <th>R:R</th>
                 <th>⭐</th>
                 <SortTh field="pnl" current={sortField} dir={sortDir} onSort={toggleSort}>P&L</SortTh>
+                <th>R-mult</th>
               </tr>
             </thead>
             <tbody>
@@ -211,7 +222,12 @@ export default function TradeLog() {
                   <td className="text-text-secondary text-xs font-num whitespace-nowrap">
                     {t.close_time ? t.close_time.substring(0, 16) : t.open_time?.substring(0, 16)}
                   </td>
-                  <td className="font-semibold text-text-primary">{t.symbol}</td>
+                  <td className="font-semibold text-text-primary">
+                    <span className="flex items-center gap-1.5">
+                      {t.symbol}
+                      {t.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-neutral flex-shrink-0" title="Pendiente de revisión" />}
+                    </span>
+                  </td>
                   <td>
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded ${t.direction === 'BUY' ? 'text-profit bg-profit/10' : 'text-loss bg-loss/10'}`}>
                       {t.direction}
@@ -231,6 +247,11 @@ export default function TradeLog() {
                       ? `${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}`
                       : <span className="text-neutral text-xs">Abierta</span>
                     }
+                  </td>
+                  <td className={`font-num text-xs font-semibold ${pnlClass(t.pnl)}`}>
+                    {t.risk_amount > 0 && t.pnl !== null
+                      ? `${t.pnl >= 0 ? '+' : ''}${(t.pnl / t.risk_amount).toFixed(1)}R`
+                      : '—'}
                   </td>
                 </tr>
               ))}

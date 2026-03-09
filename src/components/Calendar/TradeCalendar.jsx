@@ -178,6 +178,46 @@ export default function TradeCalendar() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Weekly Summary */}
+            {selectedDay && (() => {
+              const selectedDate = new Date(selectedDay + 'T12:00:00')
+              const dayOfWeek = selectedDate.getDay() // 0=Sun
+              const weekStart = new Date(selectedDate)
+              weekStart.setDate(selectedDate.getDate() - dayOfWeek)
+              const weekEnd = new Date(weekStart)
+              weekEnd.setDate(weekStart.getDate() + 6)
+              const fmt = d => d.toISOString().substring(0, 10)
+              const weekTrades = trades.filter(t =>
+                t.status === 'closed' && t.close_time >= fmt(weekStart) && t.close_time <= fmt(weekEnd) + ' 23:59:59'
+              )
+              const weekPnl = weekTrades.reduce((s, t) => s + (t.pnl || 0), 0)
+              const weekWins = weekTrades.filter(t => t.pnl > 0).length
+              if (weekTrades.length === 0) return null
+              return (
+                <div className="mt-4 p-3 bg-bg-tertiary rounded-xl border border-border">
+                  <p className="text-text-muted text-xs font-medium mb-2">Semana del {fmt(weekStart)} al {fmt(weekEnd)}</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="text-center">
+                      <p className="font-num text-lg font-bold text-text-primary">{weekTrades.length}</p>
+                      <p className="text-text-muted text-xs">trades</p>
+                    </div>
+                    <div className="text-center">
+                      <p className={`font-num text-lg font-bold ${weekPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                        {weekPnl >= 0 ? '+' : ''}{weekPnl.toFixed(2)}
+                      </p>
+                      <p className="text-text-muted text-xs">P&L</p>
+                    </div>
+                    <div className="text-center">
+                      <p className={`font-num text-lg font-bold ${weekWins / weekTrades.length >= 0.5 ? 'text-profit' : 'text-loss'}`}>
+                        {(weekWins / weekTrades.length * 100).toFixed(0)}%
+                      </p>
+                      <p className="text-text-muted text-xs">win rate</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Day trades */}
             {dayTrades.length > 0 && (
               <div>

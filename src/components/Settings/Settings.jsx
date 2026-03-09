@@ -8,10 +8,13 @@ export default function Settings({ account, setAccount }) {
   const [setups, setSetups] = useState([])
   const [newSetup, setNewSetup] = useState('')
   const [saved, setSaved] = useState(false)
+  const [goals, setGoals] = useState({ monthly_pnl: '', win_rate: '', max_trades: '' })
+  const [goalsSaved, setGoalsSaved] = useState(false)
 
   useEffect(() => {
     if (account) setForm({ ...account })
     window.api.setups.getAll().then(setSetups)
+    window.api.goals?.get().then(g => { if (g) setGoals({ monthly_pnl: g.monthly_pnl || '', win_rate: g.win_rate || '', max_trades: g.max_trades || '' }) })
   }, [account])
 
   async function handleSave(e) {
@@ -21,6 +24,17 @@ export default function Settings({ account, setAccount }) {
     setAccount(updated)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  async function handleGoalsSave(e) {
+    e.preventDefault()
+    await window.api.goals.update({
+      monthly_pnl: goals.monthly_pnl ? parseFloat(goals.monthly_pnl) : null,
+      win_rate: goals.win_rate ? parseFloat(goals.win_rate) : null,
+      max_trades: goals.max_trades ? parseInt(goals.max_trades) : null,
+    })
+    setGoalsSaved(true)
+    setTimeout(() => setGoalsSaved(false), 2000)
   }
 
   async function handleAddSetup() {
@@ -102,6 +116,34 @@ export default function Settings({ account, setAccount }) {
             ))}
           </div>
         </div>
+
+        {/* Monthly Goals */}
+        <form onSubmit={handleGoalsSave} className="card space-y-4">
+          <h2 className="text-text-primary font-semibold border-b border-border pb-2">Objetivos Mensuales</h2>
+          <p className="text-text-muted text-xs">Define tus metas para el mes y síguelas en el Dashboard.</p>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-text-muted text-xs block mb-1">P&L objetivo ({form.currency || 'EUR'})</label>
+              <input type="number" step="1" className="input w-full font-num" placeholder="Ej: 500"
+                value={goals.monthly_pnl} onChange={e => setGoals(g => ({ ...g, monthly_pnl: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-text-muted text-xs block mb-1">Win Rate objetivo (%)</label>
+              <input type="number" step="1" min="1" max="100" className="input w-full font-num" placeholder="Ej: 55"
+                value={goals.win_rate} onChange={e => setGoals(g => ({ ...g, win_rate: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-text-muted text-xs block mb-1">Máx. operaciones/mes</label>
+              <input type="number" step="1" min="1" className="input w-full font-num" placeholder="Ej: 20"
+                value={goals.max_trades} onChange={e => setGoals(g => ({ ...g, max_trades: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" className="btn-primary">
+              {goalsSaved ? '✓ Guardado' : 'Guardar Objetivos'}
+            </button>
+          </div>
+        </form>
 
         {/* App info */}
         <div className="card space-y-2">

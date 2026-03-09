@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   stats: {
     getSummary: (filters) => ipcRenderer.invoke('stats:getSummary', filters),
     getEmotionAnalysis: (filters) => ipcRenderer.invoke('stats:getEmotionAnalysis', filters),
+    getDailyLoss: () => ipcRenderer.invoke('stats:getDailyLoss'),
   },
   // Account
   account: {
@@ -35,6 +36,20 @@ contextBridge.exposeInMainWorld('api', {
   dailyNotes: {
     get: (date) => ipcRenderer.invoke('dailyNotes:get', date),
     save: (data) => ipcRenderer.invoke('dailyNotes:save', data),
+  },
+  // Goals
+  goals: {
+    get: () => ipcRenderer.invoke('goals:get'),
+    update: (data) => ipcRenderer.invoke('goals:update', data),
+    save: (data) => ipcRenderer.invoke('goals:save', data),
+  },
+  // Export
+  export: {
+    csv: (filters) => ipcRenderer.invoke('export:csv', filters),
+  },
+  // Daily stats
+  stats_extra: {
+    getDailyPnl: (date) => ipcRenderer.invoke('stats:getDailyPnl', date),
   },
   // Dialogs
   dialog: {

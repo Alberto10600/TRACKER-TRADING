@@ -36,6 +36,7 @@ export default function TradeDetail() {
       tags: Array.isArray(t.tags) ? t.tags : [],
       emotions_before: Array.isArray(t.emotions_before) ? t.emotions_before : [],
       emotions_after: Array.isArray(t.emotions_after) ? t.emotions_after : [],
+      needs_review: t?.needs_review || false,
     })
     // Load image paths
     if (t.images?.length) {
@@ -57,6 +58,7 @@ export default function TradeDetail() {
       risk_reward: form.risk_reward ? parseFloat(form.risk_reward) : null,
       risk_amount: form.risk_amount ? parseFloat(form.risk_amount) : null,
       followed_plan: form.followed_plan ? 1 : 0,
+      needs_review: form.needs_review ? 1 : 0,
     })
     setSaving(false)
     setEditing(false)
@@ -179,6 +181,11 @@ export default function TradeDetail() {
               <p className={`text-4xl font-bold font-num ${pnlClass(trade.pnl)}`}>
                 {trade.pnl !== null ? `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}€` : '—'}
               </p>
+              {trade.risk_amount > 0 && trade.pnl !== null && (
+                <p className={`text-sm font-num font-semibold ${trade.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                  {trade.pnl >= 0 ? '+' : ''}{(trade.pnl / trade.risk_amount).toFixed(2)}R
+                </p>
+              )}
             </div>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
@@ -404,6 +411,18 @@ function EditForm({ form, set, setups, toggleEmotion }) {
             className="w-4 h-4 rounded" />
           <span className="text-text-primary text-sm">Seguí mi plan de trading</span>
         </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="needs_review"
+            className="rounded"
+            checked={!!form.needs_review}
+            onChange={e => set('needs_review', e.target.checked)}
+          />
+          <label htmlFor="needs_review" className="text-text-secondary text-sm cursor-pointer">
+            Pendiente de revisión post-sesión
+          </label>
+        </div>
       </div>
 
       {/* Emotions */}

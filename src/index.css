@@ -10,16 +10,16 @@
 
 :root {
   --scrollbar-width: 6px;
-  --scrollbar-color: #1e2d45;
-  --scrollbar-thumb: #334155;
+  --scrollbar-color: #2e2b27;
+  --scrollbar-thumb: #3d3830;
 }
 
 html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background-color: #0a0e1a;
-  color: #e2e8f0;
+  background-color: #0f0e0d;
+  color: #ede9e3;
   font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -39,7 +39,7 @@ html, body, #root {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #4d463e;
 }
 
 /* Electron drag region */
@@ -51,9 +51,9 @@ html, body, #root {
 }
 
 /* Profit / Loss colors */
-.profit { color: #10b981; }
-.loss { color: #ef4444; }
-.neutral-pnl { color: #f59e0b; }
+.profit { color: #22c55e; }
+.loss { color: #f04444; }
+.neutral-pnl { color: #d97706; }
 
 /* Animations */
 @keyframes fadeIn {
@@ -120,15 +120,15 @@ html, body, #root {
 
 /* Recharts override */
 .recharts-text {
-  fill: #94a3b8 !important;
+  fill: #9e9890 !important;
 }
 .recharts-cartesian-axis-line,
 .recharts-cartesian-grid-horizontal line,
 .recharts-cartesian-grid-vertical line {
-  stroke: #1e2d45 !important;
+  stroke: #2e2b27 !important;
 }
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background: #141d2e !important;
-  border-color: #1e2d45 !important;
+  background: #1c1a17 !important;
+  border-color: #2e2b27 !important;
   border-radius: 8px !important;
 }

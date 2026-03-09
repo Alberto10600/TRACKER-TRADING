@@ -18,6 +18,7 @@ const FILES = {
   account: path.join(DATA_DIR, 'account.json'),
   setups: path.join(DATA_DIR, 'setups.json'),
   daily_notes: path.join(DATA_DIR, 'daily_notes.json'),
+  goals: path.join(DATA_DIR, 'goals.json'),
 }
 
 function read(key, def = []) {
@@ -63,6 +64,7 @@ function initDefaults() {
   }
   if (!fs.existsSync(FILES.trades)) write('trades', [])
   if (!fs.existsSync(FILES.daily_notes)) write('daily_notes', {})
+  if (!fs.existsSync(FILES.goals)) write('goals', {})
 }
 
 // ============ WINDOW ============
@@ -405,6 +407,69 @@ ipcMain.handle('account:update', (_, data) => {
   const current = read('account', {})
   write('account', { ...current, ...data })
   return { success: true }
+})
+
+// ============ GOALS ============
+ipcMain.handle('goals:get', () => {
+  return read('goals', {}) || { monthly_pnl: null, win_rate: null, max_trades: null }
+})
+
+ipcMain.handle('goals:update', (_, data) => {
+  write('goals', data)
+  return data
+})
+
+ipcMain.handle('goals:save', (_, data) => {
+  write('goals', data)
+  return data
+})
+
+// ============ EXPORT ============
+ipcMain.handle('export:csv', (_, filters = {}) => {
+  const trades = read('trades').filter(t => {
+    if (filters.status && t.status !== filters.status) return false
+    if (filters.dateFrom && t.close_time && t.close_time < filters.dateFrom) return false
+    if (filters.dateTo && t.close_time && t.close_time > filters.dateTo + ' 23:59:59') return false
+    return true
+  })
+  const headers = ['id','position_id','symbol','instrument_type','direction','status','open_time','close_time','open_price','close_price','volume','stop_loss','take_profit','pnl','commission','swap','setup','session','risk_reward','risk_amount','rating','followed_plan','notes']
+  const rows = trades.map(t => headers.map(h => {
+    const v = t[h]
+    if (v === null || v === undefined) return ''
+    if (typeof v === 'string' && v.includes(',')) return `"${v.replace(/"/g, '""')}"`
+    return String(v)
+  }).join(','))
+  return [headers.join(','), ...rows].join('\n')
+})
+
+ipcMain.handle('stats:getDailyLoss', () => {
+  const trades = read('trades')
+  const account = read('account') || {}
+  const today = new Date().toISOString().substring(0, 10)
+  const todayTrades = trades.filter(t =>
+    t.status === 'closed' && t.close_time && t.close_time.substring(0, 10) === today
+  )
+  const todayPnl = todayTrades.reduce((s, t) => s + (t.pnl || 0), 0)
+  const balance = account.initial_balance || 10000
+  const maxLossPct = account.max_daily_loss || 3
+  const maxLossAmt = -(balance * maxLossPct / 100)
+  return {
+    today_pnl: todayPnl,
+    max_loss_amount: maxLossAmt,
+    max_loss_pct: maxLossPct,
+    is_exceeded: todayPnl < maxLossAmt,
+    pct_used: maxLossAmt < 0 ? Math.min(100, (Math.abs(todayPnl) / Math.abs(maxLossAmt)) * 100) : 0
+  }
+})
+
+// ============ DAILY LOSS CHECK ============
+ipcMain.handle('stats:getDailyPnl', (_, date) => {
+  const dateStr = date || new Date().toISOString().substring(0, 10)
+  const trades = read('trades').filter(t =>
+    t.status === 'closed' && t.close_time && t.close_time.startsWith(dateStr)
+  )
+  const pnl = trades.reduce((s, t) => s + (t.pnl || 0), 0)
+  return { date: dateStr, pnl, trades: trades.length }
 })
 
 // ============ SETUPS ============

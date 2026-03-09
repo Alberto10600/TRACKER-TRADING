@@ -9,6 +9,16 @@ import { formatCurrency, pnlClass } from '../../utils/tradeMetrics'
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const SESSIONS = ['Asiática', 'Londres AM', 'Nueva York AM', 'Nueva York PM', 'Pre-Mercado']
 
+function detectKillZone(timeStr) {
+  if (!timeStr) return null
+  const h = new Date(timeStr).getUTCHours()
+  if (h >= 0 && h < 2) return 'Asian KZ'
+  if (h >= 7 && h < 9) return 'London KZ'
+  if (h >= 12 && h < 14) return 'NY AM KZ'
+  if (h >= 17 && h < 18) return 'NY PM KZ'
+  return null // outside kill zone
+}
+
 export default function Analytics() {
   const [data, setData] = useState(null)
   const [trades, setTrades] = useState([])
@@ -270,6 +280,130 @@ export default function Analytics() {
             </ResponsiveContainer>
           ) : <EmptyChart />}
         </div>
+      </div>
+
+      {/* Kill Zone Analysis */}
+      <div className="card">
+        <h2 className="text-text-primary font-semibold mb-4">Kill Zones</h2>
+        <p className="text-text-muted text-xs mb-4">Análisis de rendimiento dentro de las ventanas horarias ICT</p>
+        {(() => {
+          const kzNames = ['Asian KZ', 'London KZ', 'NY AM KZ', 'NY PM KZ']
+          const kzStats = kzNames.map(kz => {
+            const kzTrades = trades.filter(t => t.status === 'closed' && detectKillZone(t.open_time) === kz)
+            const wins = kzTrades.filter(t => t.pnl > 0).length
+            const pnl = kzTrades.reduce((s, t) => s + (t.pnl || 0), 0)
+            return {
+              name: kz,
+              trades: kzTrades.length,
+              wins,
+              winRate: kzTrades.length > 0 ? (wins / kzTrades.length * 100) : 0,
+              pnl,
+            }
+          })
+          const outsideKZ = trades.filter(t => t.status === 'closed' && !detectKillZone(t.open_time))
+          const outsideWins = outsideKZ.filter(t => t.pnl > 0).length
+          const allStats = [...kzStats, {
+            name: 'Fuera de KZ',
+            trades: outsideKZ.length,
+            wins: outsideWins,
+            winRate: outsideKZ.length > 0 ? (outsideWins / outsideKZ.length * 100) : 0,
+            pnl: outsideKZ.reduce((s, t) => s + (t.pnl || 0), 0),
+          }]
+          return (
+            <table className="w-full trade-table text-sm">
+              <thead>
+                <tr>
+                  <th>Ventana</th>
+                  <th>Trades</th>
+                  <th>Win Rate</th>
+                  <th className="text-right">P&L Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allStats.map(kz => (
+                  <tr key={kz.name}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${kz.name === 'Fuera de KZ' ? 'bg-text-muted' : 'bg-accent-blue'}`} />
+                        <span className="font-medium text-text-primary">{kz.name}</span>
+                      </div>
+                    </td>
+                    <td className="font-num text-text-secondary">{kz.trades}</td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${kz.winRate >= 50 ? 'bg-profit' : 'bg-loss'}`}
+                            style={{ width: `${kz.winRate}%` }} />
+                        </div>
+                        <span className={`font-num text-xs ${kz.winRate >= 50 ? 'text-profit' : 'text-loss'}`}>
+                          {kz.winRate.toFixed(0)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className={`text-right font-num font-semibold ${kz.pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                      {kz.pnl >= 0 ? '+' : ''}{kz.pnl.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        })()}
+      </div>
+
+      {/* Setup × Session Heatmap */}
+      <div className="card">
+        <h2 className="text-text-primary font-semibold mb-1">Setup × Sesión</h2>
+        <p className="text-text-muted text-xs mb-4">Win rate por combinación de setup y sesión</p>
+        {(() => {
+          const sessions = ['Londres AM', 'Nueva York AM', 'Nueva York PM', 'Asiática']
+          const setupNames = [...new Set(trades.filter(t => t.setup).map(t => t.setup))].slice(0, 8)
+          if (setupNames.length === 0) return <p className="text-text-muted text-sm">Sin setups registrados</p>
+          return (
+            <div className="overflow-x-auto">
+              <table className="text-xs w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left py-2 pr-4 text-text-muted font-medium">Setup</th>
+                    {sessions.map(s => (
+                      <th key={s} className="text-center py-2 px-2 text-text-muted font-medium whitespace-nowrap">{s}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {setupNames.map(setup => (
+                    <tr key={setup}>
+                      <td className="py-1.5 pr-4 text-text-secondary font-medium whitespace-nowrap">{setup}</td>
+                      {sessions.map(session => {
+                        const cell = trades.filter(t =>
+                          t.status === 'closed' && t.setup === setup && t.session === session
+                        )
+                        const wins = cell.filter(t => t.pnl > 0).length
+                        const wr = cell.length > 0 ? wins / cell.length : null
+                        const bg = wr === null ? 'bg-bg-tertiary' :
+                          wr >= 0.7 ? 'bg-profit/30' :
+                          wr >= 0.5 ? 'bg-profit/10' :
+                          wr >= 0.35 ? 'bg-loss/10' : 'bg-loss/25'
+                        const textColor = wr === null ? 'text-text-muted' :
+                          wr >= 0.5 ? 'text-profit' : 'text-loss'
+                        return (
+                          <td key={session} className="py-1.5 px-2 text-center">
+                            <div className={`rounded-md px-2 py-1 ${bg}`}>
+                              <span className={`font-num font-semibold ${textColor}`}>
+                                {wr !== null ? `${(wr*100).toFixed(0)}%` : '—'}
+                              </span>
+                              {cell.length > 0 && <span className="text-text-muted ml-1">({cell.length})</span>}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

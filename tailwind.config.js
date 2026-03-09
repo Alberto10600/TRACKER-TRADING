@@ -8,25 +8,25 @@ export default {
     extend: {
       colors: {
         bg: {
-          primary: '#0a0e1a',
-          secondary: '#0f1629',
-          tertiary: '#1a2235',
-          card: '#141d2e',
-          hover: '#1e2d45',
+          primary: '#0f0e0d',
+          secondary: '#181614',
+          tertiary: '#201e1b',
+          card: '#1c1a17',
+          hover: '#272421',
         },
         accent: {
-          blue: '#3b82f6',
-          purple: '#8b5cf6',
-          cyan: '#06b6d4',
+          blue: '#6366f1',
+          purple: '#818cf8',
+          cyan: '#a78bfa',
         },
-        profit: '#10b981',
-        loss: '#ef4444',
-        neutral: '#f59e0b',
-        border: '#1e2d45',
+        profit: '#22c55e',
+        loss: '#f04444',
+        neutral: '#d97706',
+        border: '#2e2b27',
         text: {
-          primary: '#e2e8f0',
-          secondary: '#94a3b8',
-          muted: '#475569',
+          primary: '#ede9e3',
+          secondary: '#9e9890',
+          muted: '#5c5650',
         }
       },
       fontFamily: {
