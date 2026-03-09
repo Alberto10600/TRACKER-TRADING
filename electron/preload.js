@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   // Stats
   stats: {
     getSummary: (filters) => ipcRenderer.invoke('stats:getSummary', filters),
+    getEmotionAnalysis: (filters) => ipcRenderer.invoke('stats:getEmotionAnalysis', filters),
   },
   // Account
   account: {

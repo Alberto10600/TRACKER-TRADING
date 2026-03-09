@@ -1,6 +1,88 @@
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 
+// ============ SYMBOL NORMALIZATION ============
+// Maps XTB-specific symbol names to standard industry symbols
+const SYMBOL_MAP = {
+  'GOLD': 'XAUUSD',
+  'SILVER': 'XAGUSD',
+  'PLATINUM': 'XPTUSD',
+  'PALLADIUM': 'XPDUSD',
+  'OIL': 'USOIL',
+  'OILUK': 'UKOIL',
+  'BRENT': 'UKOIL',
+  'NATGAS': 'XNGUSD',
+  'COPPER': 'XCUUSD',
+  'CORN': 'CORN',
+  'WHEAT': 'WHEAT',
+  'SOYBEAN': 'SOYBEAN',
+  'BITCOIN': 'BTCUSD',
+  'BTC': 'BTCUSD',
+  'ETH': 'ETHUSD',
+  'ETHEREUM': 'ETHUSD',
+  'LITECOIN': 'LTCUSD',
+  'LTC': 'LTCUSD',
+  'US100': 'US100',
+  'US30': 'US30',
+  'US500': 'US500',
+  'DE40': 'DE40',
+  'UK100': 'UK100',
+  'EU50': 'EU50',
+  'JP225': 'JP225',
+  'AUS200': 'AUS200',
+  'HK50': 'HK50',
+  'NASDAQ': 'US100',
+  'DOW': 'US30',
+  'SPX': 'US500',
+  'DAX': 'DE40',
+  'FTSE': 'UK100',
+}
+
+// Detect instrument type from (normalized) symbol
+function detectInstrumentType(symbol) {
+  if (!symbol) return 'unknown'
+  const s = symbol.toUpperCase()
+
+  // Commodities - metals
+  if (['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'XCUUSD'].includes(s)) return 'commodity'
+  // Commodities - energy
+  if (['USOIL', 'UKOIL', 'XNGUSD'].includes(s)) return 'commodity'
+  // Commodities - softs
+  if (['CORN', 'WHEAT', 'SOYBEAN'].includes(s)) return 'commodity'
+  // Crypto
+  if (s.endsWith('BTC') || s.startsWith('BTC') || s.endsWith('ETH') || s.startsWith('ETH') ||
+      ['BTCUSD', 'ETHUSD', 'LTCUSD', 'XRPUSD', 'ADAUSD', 'SOLUSD', 'DOTUSD'].includes(s)) return 'crypto'
+  // Indices
+  if (['US100', 'US30', 'US500', 'DE40', 'UK100', 'EU50', 'JP225', 'AUS200', 'HK50',
+       'NAS100', 'SPX500', 'NASDAQ', 'DOW', 'DAX', 'FTSE'].includes(s)) return 'index'
+  // Stocks (typically end in .US, .DE, .UK etc or are known tickers)
+  if (s.includes('.') || s.match(/^[A-Z]{1,5}(\.US|\.DE|\.UK|\.FR)$/)) return 'stock'
+  // Forex: standard 6-char currency pairs or with suffix
+  if (s.match(/^[A-Z]{6}(\.?[a-z]*)?$/) && !s.includes('USD') === false) {
+    // Most 6-char uppercase symbols that look like currency pairs
+    const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD', 'SEK', 'NOK', 'DKK', 'SGD', 'HKD', 'MXN', 'ZAR', 'TRY', 'PLN', 'CZK', 'HUF', 'RON']
+    const base = s.substring(0, 3)
+    const quote = s.substring(3, 6)
+    if (currencies.includes(base) && currencies.includes(quote)) return 'forex'
+  }
+  // Fallback: if 6 chars and all uppercase letters, likely forex
+  if (s.match(/^[A-Z]{6}$/)) return 'forex'
+  return 'unknown'
+}
+
+// Normalize XTB symbol to standard form
+function normalizeSymbol(rawSymbol) {
+  if (!rawSymbol) return rawSymbol
+  const upper = rawSymbol.trim().toUpperCase()
+  // Check direct map first
+  if (SYMBOL_MAP[upper]) return SYMBOL_MAP[upper]
+  // Some XTB symbols have suffixes like "GOLD.US" or "XAUUSD_4" — strip known suffixes
+  const withoutSuffix = upper.replace(/[._].*$/, '')
+  if (SYMBOL_MAP[withoutSuffix]) return SYMBOL_MAP[withoutSuffix]
+  // Return cleaned uppercase symbol
+  return upper
+}
+
 // Determine trading session from time
 function detectSession(timeStr) {
   if (!timeStr) return null
@@ -55,10 +137,12 @@ export function parseXTBCSV(content) {
 
       const isOpen = !closeTime || closeTime === ''
       const pnl = isOpen ? null : profit + commission + swap
+      const normalizedSymbol = normalizeSymbol(symbol)
 
       trades.push({
         position_id: String(positionId),
-        symbol: symbol.toUpperCase(),
+        symbol: normalizedSymbol,
+        instrument_type: detectInstrumentType(normalizedSymbol),
         direction,
         open_time: openTime,
         close_time: isOpen ? null : closeTime,
@@ -170,10 +254,12 @@ export function parseXTBXLSX(buffer) {
 
       let direction = type.includes('SELL') || type === 'S' ? 'SELL' : 'BUY'
       const isOpen = !closeTime
+      const normalizedSymbol = normalizeSymbol(symbol)
 
       trades.push({
         position_id: String(positionId),
-        symbol: symbol.toUpperCase(),
+        symbol: normalizedSymbol,
+        instrument_type: detectInstrumentType(normalizedSymbol),
         direction,
         open_time: openTime,
         close_time: isOpen ? null : closeTime,

@@ -227,21 +227,82 @@ ipcMain.handle('stats:getSummary', (_, filters = {}) => {
   const grossProfit = sum(winners.map(t => t.pnl))
   const grossLoss = Math.abs(sum(losers.map(t => t.pnl)))
 
+  const winRate = trades.length > 0 ? winners.length / trades.length : 0
+  const avgWin = avg(winners.map(t => t.pnl))
+  const avgLoss = avg(losers.map(t => t.pnl)) // negative value
+  const totalPnl = sum(pnls)
+
+  // --- Profit Factor ---
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0
+
+  // --- Expected Value per trade ---
+  const lossRate = trades.length > 0 ? losers.length / trades.length : 0
+  const expectedValue = (winRate * avgWin) + (lossRate * avgLoss) // avgLoss is already negative
+
+  // --- Max Drawdown (absolute and %) from equity peak ---
+  const sortedByDate = [...trades].sort((a, b) =>
+    new Date(a.close_time) - new Date(b.close_time)
+  )
+  let runningPnl = 0
+  let peak = 0
+  let maxDrawdown = 0
+  let peakAtMaxDD = 0
+  for (const t of sortedByDate) {
+    runningPnl += t.pnl
+    if (runningPnl > peak) peak = runningPnl
+    const dd = peak - runningPnl
+    if (dd > maxDrawdown) { maxDrawdown = dd; peakAtMaxDD = peak }
+  }
+  const maxDrawdownPct = peakAtMaxDD > 0 ? (maxDrawdown / peakAtMaxDD) * 100 : 0
+
+  // --- Recovery Factor ---
+  const recoveryFactor = maxDrawdown > 0 ? totalPnl / maxDrawdown : totalPnl > 0 ? Infinity : 0
+
+  // --- Consecutive wins / losses ---
+  let maxWinStreak = 0, maxLossStreak = 0, curW = 0, curL = 0
+  for (const t of sortedByDate) {
+    if (t.pnl > 0) { curW++; curL = 0; if (curW > maxWinStreak) maxWinStreak = curW }
+    else if (t.pnl < 0) { curL++; curW = 0; if (curL > maxLossStreak) maxLossStreak = curL }
+    else { curW = 0; curL = 0 }
+  }
+
+  // --- Average holding time in minutes ---
+  const holdingTimes = trades
+    .filter(t => t.open_time && t.close_time)
+    .map(t => (new Date(t.close_time) - new Date(t.open_time)) / 60000)
+    .filter(m => m >= 0)
+  const avgHoldingTimeMinutes = holdingTimes.length > 0 ? avg(holdingTimes) : 0
+
+  // --- Trades per active trading day ---
+  const tradingDays = new Set(sortedByDate.map(t => t.close_time?.substring(0, 10)).filter(Boolean))
+  const tradesPerDay = tradingDays.size > 0 ? trades.length / tradingDays.size : 0
+
   const stats = {
     total_trades: trades.length,
     winning_trades: winners.length,
     losing_trades: losers.length,
-    total_pnl: sum(pnls),
+    total_pnl: totalPnl,
     avg_pnl: avg(pnls),
     best_trade: pnls.length ? Math.max(...pnls) : 0,
     worst_trade: pnls.length ? Math.min(...pnls) : 0,
-    avg_win: avg(winners.map(t => t.pnl)),
-    avg_loss: avg(losers.map(t => t.pnl)),
+    avg_win: avgWin,
+    avg_loss: avgLoss,
     gross_profit: grossProfit,
     gross_loss: -grossLoss,
     avg_rr: avg(trades.filter(t => t.risk_reward).map(t => t.risk_reward)),
     total_commission: sum(trades.map(t => t.commission || 0)),
     total_swap: sum(trades.map(t => t.swap || 0)),
+    // --- Advanced metrics ---
+    profit_factor: profitFactor,
+    expected_value: expectedValue,
+    max_drawdown: maxDrawdown,
+    max_drawdown_pct: maxDrawdownPct,
+    recovery_factor: recoveryFactor,
+    consecutive_wins: maxWinStreak,
+    consecutive_losses: maxLossStreak,
+    avg_holding_time_minutes: avgHoldingTimeMinutes,
+    trades_per_day: tradesPerDay,
+    win_rate: winRate * 100,
   }
 
   const groupBy = (arr, key) => arr.reduce((acc, t) => {
@@ -285,7 +346,53 @@ ipcMain.handle('stats:getSummary', (_, filters = {}) => {
   const byDayOfWeek = Object.values(dowMap).sort((a, b) => a.dow.localeCompare(b.dow))
   const byHour = Object.values(hourMap).sort((a, b) => a.hour.localeCompare(b.hour))
 
-  return { stats, bySymbol, bySetup, bySession, dailyPnl, byDirection, byDayOfWeek, byHour }
+  // --- Monthly stats ---
+  const monthlyMap = {}
+  trades.forEach(t => {
+    if (!t.close_time) return
+    const month = t.close_time.substring(0, 7) // "YYYY-MM"
+    if (!monthlyMap[month]) monthlyMap[month] = { month, pnl: 0, trades: 0, wins: 0 }
+    monthlyMap[month].pnl += t.pnl
+    monthlyMap[month].trades++
+    if (t.pnl > 0) monthlyMap[month].wins++
+  })
+  const monthlyStats = Object.values(monthlyMap)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map(m => ({ ...m, win_rate: m.trades > 0 ? (m.wins / m.trades) * 100 : 0 }))
+
+  return { stats, bySymbol, bySetup, bySession, dailyPnl, byDirection, byDayOfWeek, byHour, monthlyStats }
+})
+
+// ============ EMOTION ANALYSIS ============
+ipcMain.handle('stats:getEmotionAnalysis', (_, filters = {}) => {
+  let trades = read('trades').filter(t => t.status === 'closed' && t.pnl !== null)
+
+  if (filters.dateFrom) trades = trades.filter(t => (t.close_time || '') >= filters.dateFrom)
+  if (filters.dateTo) trades = trades.filter(t => (t.close_time || '') <= filters.dateTo + ' 23:59:59')
+
+  // Group by primary emotion before trade
+  const emotionMap = {}
+  trades.forEach(t => {
+    const emotions = Array.isArray(t.emotions_before) ? t.emotions_before : []
+    const primaryEmotion = emotions[0] || 'Sin registro'
+    if (!emotionMap[primaryEmotion]) {
+      emotionMap[primaryEmotion] = { emotion: primaryEmotion, trades: 0, wins: 0, totalPnl: 0, pnls: [] }
+    }
+    emotionMap[primaryEmotion].trades++
+    emotionMap[primaryEmotion].totalPnl += t.pnl
+    emotionMap[primaryEmotion].pnls.push(t.pnl)
+    if (t.pnl > 0) emotionMap[primaryEmotion].wins++
+  })
+
+  const result = Object.values(emotionMap).map(e => ({
+    emotion: e.emotion,
+    trades: e.trades,
+    win_rate: e.trades > 0 ? (e.wins / e.trades) * 100 : 0,
+    avg_pnl: e.pnls.length > 0 ? e.totalPnl / e.pnls.length : 0,
+    total_pnl: e.totalPnl,
+  })).sort((a, b) => b.avg_pnl - a.avg_pnl)
+
+  return result
 })
 
 // ============ ACCOUNT ============
